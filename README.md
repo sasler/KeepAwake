@@ -2,8 +2,6 @@
 
 A tiny Windows tray app (~330 KB exe, ~1.5 MB private memory, near-zero CPU, no dependencies besides `windows-sys`) that stops Windows from locking or sleeping while you're idle.
 
-![Tray icons: off, keep awake, simulate activity](docs/icons.png)
-
 The icons are drawn in code ([src/art.rs](src/art.rs)) at the exact size Windows needs, and `build.rs` embeds the same artwork as the exe icon.
 
 ## Modes
