@@ -18,6 +18,10 @@ Windows-only tray app in Rust. See README.md for what it does.
 - The Settings and About windows are plain Win32 windows built by `src/ui.rs`, with layouts in 96-DPI pixels that are rescaled on `WM_DPICHANGED`. Open them outside `with_app`, because creating a window sends messages that need the app state. Checkboxes are owner-drawn so their labels can use dark-mode colors.
 - `src/theme.rs` follows `AppsUseLightTheme` for windows and menus and `SystemUsesLightTheme` for the tray icon. The `theme` config key overrides the window and menu colors. Dark menus rely on the undocumented uxtheme ordinals 135 and 136.
 
+## Commits and PRs
+
+Start every commit subject and PR title with a [gitmoji](https://gitmoji.dev) that fits the change, for example `✨ Add About window`, `🐛 Fix tray icon after Explorer restart`, `📝 Update README` or `🔖 Release 0.2.0`.
+
 ## Release
 
 Bump `version` in `Cargo.toml`, commit, build, then run `gh release create vX.Y.Z target/release/keepawake.exe`. Keep the asset name, because the README's install steps download `releases/latest/download/keepawake.exe`.
