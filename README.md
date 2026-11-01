@@ -56,3 +56,7 @@ Output: `target\release\keepawake.exe`. Copy it anywhere, run it, and enable *St
 
 - Windows **Dynamic Lock** (locks when your phone's Bluetooth goes away) and **presence sensing** (locks when a laptop sensor sees you leave) don't use the idle timer, so this app can't stop them. Turn them off in Settings → Accounts → Sign-in options / Privacy & security → Presence sensing.
 - If your organization requires the screen lock on this device, check that this is allowed before using it.
+
+## License
+
+[MIT](LICENSE)

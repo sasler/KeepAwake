@@ -3,6 +3,8 @@ name = "keepawake"
 version = "0.1.0"
 edition = "2021"
 description = "Tiny tray app that keeps Windows awake or simulates activity"
+license = "MIT"
+repository = "https://github.com/sasler/KeepAwake"
 
 [dependencies.windows-sys]
 version = "0.59"
