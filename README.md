@@ -57,4 +57,4 @@ Output: `target\release\keepawake.exe`. Copy it anywhere, run it, and enable *St
 
 ## License
 
-Public domain ([The Unlicense](LICENSE)). Do whatever you want with it, no attribution needed.
+[MIT](LICENSE)
