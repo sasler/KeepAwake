@@ -42,6 +42,25 @@ pub enum InputKind {
     Mouse,
 }
 
+/// Window and menu colors.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Theme {
+    System = 0,
+    Light = 1,
+    Dark = 2,
+}
+
+impl Theme {
+    fn key(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Config {
     pub mode: Mode,
     /// Unix seconds when `mode` turns off again; 0 = indefinitely.
@@ -56,6 +75,7 @@ pub struct Config {
     pub schedule_start: u16,
     pub schedule_end: u16,
     pub schedule_mode: Mode,
+    pub theme: Theme,
 }
 
 impl Default for Config {
@@ -71,6 +91,7 @@ impl Default for Config {
             schedule_start: 8 * 60,
             schedule_end: 17 * 60,
             schedule_mode: Mode::Activity,
+            theme: Theme::System,
         }
     }
 }
@@ -124,6 +145,13 @@ impl Config {
                     Some(Mode::Off) | None => {}
                     Some(m) => c.schedule_mode = m,
                 },
+                "theme" => {
+                    c.theme = match v.to_ascii_lowercase().as_str() {
+                        "light" => Theme::Light,
+                        "dark" => Theme::Dark,
+                        _ => Theme::System,
+                    }
+                }
                 _ => {}
             }
         }
@@ -158,6 +186,9 @@ schedule_start={start}
 schedule_end={end}
 # awake | activity
 schedule_mode={smode}
+
+# Window and menu colors: system | light | dark
+theme={theme}
 ",
             mode = self.mode.key(),
             until = self.until,
@@ -168,6 +199,7 @@ schedule_mode={smode}
             start = fmt_hhmm(self.schedule_start),
             end = fmt_hhmm(self.schedule_end),
             smode = self.schedule_mode.key(),
+            theme = self.theme.key(),
         );
         fs::write(p, text)
     }
@@ -203,16 +235,43 @@ pub fn fmt_hhmm(minutes: u16) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
 }
 
-fn parse_hhmm(s: &str) -> Option<u16> {
+pub fn parse_hhmm(s: &str) -> Option<u16> {
     let (h, m) = s.split_once(':')?;
     let (h, m): (u16, u16) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
     (h < 24 && m < 60).then_some(h * 60 + m)
 }
 
+const DAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/// Inverse of `parse_days`, Monday first: "Mon-Fri", "Mon,Wed,Fri", "Fri-Sun".
+pub fn format_days(days: &[bool; 7]) -> String {
+    let order = [1, 2, 3, 4, 5, 6, 0];
+    let mut parts = Vec::new();
+    let mut i = 0;
+    while i < 7 {
+        if !days[order[i]] {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i + 1 < 7 && days[order[i + 1]] {
+            i += 1;
+        }
+        let (a, b) = (DAY_NAMES[order[start]], DAY_NAMES[order[i]]);
+        match i - start {
+            0 => parts.push(a.to_string()),
+            1 => parts.push(format!("{a},{b}")),
+            _ => parts.push(format!("{a}-{b}")),
+        }
+        i += 1;
+    }
+    parts.join(",")
+}
+
 fn day_index(s: &str) -> Option<usize> {
     let s = s.trim().to_ascii_lowercase();
     let prefix = s.get(..3)?;
-    ["sun", "mon", "tue", "wed", "thu", "fri", "sat"].iter().position(|d| *d == prefix)
+    DAY_NAMES.iter().position(|d| d.eq_ignore_ascii_case(prefix))
 }
 
 fn parse_days(s: &str) -> Option<[bool; 7]> {
@@ -244,6 +303,14 @@ mod tests {
         assert_eq!(parse_days("Fri-Mon"), Some([true, true, false, false, false, true, true]));
         assert_eq!(parse_days("mon, Wednesday"), Some([false, true, false, true, false, false, false]));
         assert_eq!(parse_days("Funday"), None);
+    }
+
+    #[test]
+    fn days_round_trip() {
+        for text in ["Mon-Fri", "Mon,Wed,Fri", "Fri-Sun", "Sat,Sun", "Mon-Sun", "Mon,Tue,Thu-Sat", ""] {
+            let days = parse_days(text).unwrap();
+            assert_eq!(format_days(&days), text);
+        }
     }
 
     #[test]

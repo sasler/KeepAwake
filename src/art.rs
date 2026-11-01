@@ -20,6 +20,8 @@ const AMBER: Rgb = (0xF5, 0x9E, 0x0B);
 const COFFEE: Rgb = (0x5B, 0x34, 0x14);
 const GRAY: Rgb = (0x9C, 0xA3, 0xAF);
 const GRAY_DARK: Rgb = (0x4B, 0x55, 0x63);
+const SLATE: Rgb = (0x6B, 0x72, 0x80);
+const SLATE_DARK: Rgb = (0x37, 0x41, 0x51);
 const GREEN: Rgb = (0x22, 0xC5, 0x5E);
 
 fn dist(u: f32, v: f32, cx: f32, cy: f32) -> f32 {
@@ -47,9 +49,14 @@ fn wisp(u: f32, v: f32, xc: f32, phase: f32, half_width: f32) -> bool {
 }
 
 /// Color at unit coordinates (0..1, y down), or None for transparent.
-fn sample(u: f32, v: f32, look: Look, small: bool) -> Option<Rgb> {
+/// `light_bg` darkens the gray "off" mug so it stays visible on a light taskbar.
+fn sample(u: f32, v: f32, look: Look, small: bool, light_bg: bool) -> Option<Rgb> {
     let active = look != Look::Off;
-    let (body, surface) = if active { (AMBER, COFFEE) } else { (GRAY, GRAY_DARK) };
+    let (body, surface) = match (active, light_bg) {
+        (true, _) => (AMBER, COFFEE),
+        (false, false) => (GRAY, GRAY_DARK),
+        (false, true) => (SLATE, SLATE_DARK),
+    };
     let mut c = None;
 
     let d = dist(u, v, 0.68, 0.63);
@@ -84,6 +91,11 @@ fn sample(u: f32, v: f32, look: Look, small: bool) -> Option<Rgb> {
 
 /// Renders the mug as straight-alpha RGBA, `size * size * 4` bytes, rows top-down.
 pub fn render(size: u32, look: Look) -> Vec<u8> {
+    render_on(size, look, false)
+}
+
+/// Like `render`, tuned for a light (`light_bg`) or dark background.
+pub fn render_on(size: u32, look: Look, light_bg: bool) -> Vec<u8> {
     const SS: u32 = 4; // 4x4 supersampling for anti-aliasing
     let small = size <= 20;
     let mut out = vec![0u8; (size * size * 4) as usize];
@@ -94,7 +106,7 @@ pub fn render(size: u32, look: Look) -> Vec<u8> {
                 for sx in 0..SS {
                     let u = (px as f32 + (sx as f32 + 0.5) / SS as f32) / size as f32;
                     let v = (py as f32 + (sy as f32 + 0.5) / SS as f32) / size as f32;
-                    if let Some(c) = sample(u, v, look, small) {
+                    if let Some(c) = sample(u, v, look, small, light_bg) {
                         r += c.0 as u32;
                         g += c.1 as u32;
                         b += c.2 as u32;

@@ -1,14 +1,17 @@
 #![windows_subsystem = "windows"]
 
+mod about;
 mod art;
 mod autostart;
 mod config;
 mod icons;
 mod power;
+mod settings;
+mod theme;
+mod ui;
 
 use std::cell::RefCell;
 use std::mem::{size_of, zeroed};
-use std::process::Command;
 use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 
@@ -18,6 +21,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 use windows_sys::Win32::System::Threading::CreateMutexW;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
 use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
@@ -25,7 +29,7 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use art::Look;
-use config::{fmt_hhmm, now_unix, Config, Mode};
+use config::{fmt_hhmm, now_unix, Config, Mode, Theme};
 
 const WM_TRAY: u32 = WM_APP + 1;
 const TIMER_ID: usize = 1;
@@ -41,6 +45,7 @@ const ID_SCHEDULE: u32 = 300;
 const ID_AUTOSTART: u32 = 301;
 const ID_SETTINGS: u32 = 302;
 const ID_EXIT: u32 = 303;
+const ID_ABOUT: u32 = 304;
 
 const DURATIONS: [(&str, u64); 5] =
     [("30 minutes", 30), ("1 hour", 60), ("2 hours", 120), ("4 hours", 240), ("8 hours", 480)];
@@ -82,6 +87,8 @@ struct App {
     applied: Option<Mode>,
     shown: Option<(Mode, String)>,
     taskbar_created: u32,
+    /// Theme last applied to menus and windows.
+    theme: Option<Theme>,
 }
 
 impl App {
@@ -105,6 +112,13 @@ impl App {
     fn secs_until_schedule_end(&self) -> u64 {
         let (_, _, sec) = local_now();
         (self.cfg.schedule_end as u64 * 60).saturating_sub(sec as u64)
+    }
+
+    /// Applies changes made in the Settings window.
+    fn update(&mut self, f: impl FnOnce(&mut Config)) {
+        f(&mut self.cfg);
+        self.save();
+        self.tick(false);
     }
 
     fn save(&mut self) {
@@ -143,6 +157,13 @@ impl App {
             self.cfg.mode = Mode::Off;
             self.cfg.until = 0;
             self.save();
+        }
+
+        if self.theme != Some(self.cfg.theme) {
+            self.theme = Some(self.cfg.theme);
+            theme::set_pref(self.cfg.theme);
+            theme::apply_to_menus();
+            ui::refresh();
         }
 
         let (mode, source) = self.effective();
@@ -185,6 +206,18 @@ impl App {
             *dst = src;
         }
         unsafe { Shell_NotifyIconW(msg, &nid) };
+    }
+
+    /// Redraws the tray icons for the current taskbar color.
+    fn reload_icons(&mut self) {
+        let light = theme::taskbar_light();
+        for (icon, look) in self.icons.iter_mut().zip([Look::Off, Look::Awake, Look::Activity]) {
+            unsafe { DestroyIcon(*icon) };
+            *icon = icons::make(look, light);
+        }
+        if let Some((mode, tip)) = &self.shown {
+            self.notify(NIM_MODIFY, *mode, tip);
+        }
     }
 
     /// (Re)creates the tray icon, e.g. at startup or after Explorer restarts.
@@ -234,7 +267,8 @@ impl App {
             );
             append(menu, checked(self.cfg.schedule_enabled), ID_SCHEDULE, &schedule_label);
             append(menu, checked(autostart::is_enabled()), ID_AUTOSTART, "Start with Windows");
-            append(menu, MF_STRING, ID_SETTINGS, "Edit settings\u{2026}");
+            append(menu, MF_STRING, ID_SETTINGS, "Settings\u{2026}");
+            append(menu, MF_STRING, ID_ABOUT, "About KeepAwake");
             append(menu, MF_SEPARATOR, 0, "");
             append(menu, MF_STRING, ID_EXIT, "Exit");
             menu
@@ -264,9 +298,6 @@ impl App {
                 self.tick(false);
             }
             ID_AUTOSTART => autostart::set(!autostart::is_enabled()),
-            ID_SETTINGS => {
-                let _ = Command::new("notepad.exe").arg(config::path()).spawn();
-            }
             _ => {}
         }
     }
@@ -301,15 +332,34 @@ fn show_menu(hwnd: HWND) {
         DestroyMenu(menu);
         cmd as u32
     };
-    match cmd {
-        0 => {}
+    if cmd != 0 {
+        run_command(hwnd, cmd);
+    }
+}
+
+/// Runs a menu command. Windows are opened outside `with_app`, since creating them
+/// sends messages that need the app state.
+fn run_command(hwnd: HWND, id: u32) {
+    match id {
         ID_EXIT => unsafe {
             DestroyWindow(hwnd);
         },
+        ID_SETTINGS => settings::open(),
+        ID_ABOUT => about::open(),
         id => {
             with_app(|app| app.command(id));
         }
     }
+}
+
+/// Whether a WM_SETTINGCHANGE lParam names the given setting.
+unsafe fn setting_is(lp: LPARAM, name: &str) -> bool {
+    let p = lp as *const u16;
+    if p.is_null() {
+        return false;
+    }
+    let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+    std::slice::from_raw_parts(p, len).iter().copied().eq(name.encode_utf16())
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -327,6 +377,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 _ => {}
             }
             0
+        }
+        // Lets the menu IDs be triggered from outside, e.g. by tests.
+        WM_COMMAND => {
+            run_command(hwnd, (wp & 0xFFFF) as u32);
+            0
+        }
+        WM_SETTINGCHANGE => {
+            if setting_is(lp, "ImmersiveColorSet") {
+                theme::apply_to_menus();
+                ui::refresh();
+                with_app(|app| app.reload_icons());
+            }
+            DefWindowProcW(hwnd, msg, wp, lp)
         }
         WM_DESTROY => {
             with_app(|app| app.shutdown());
@@ -388,16 +451,21 @@ fn main() {
         if !config::path().exists() {
             let _ = cfg.save();
         }
+        theme::set_pref(cfg.theme);
+        theme::apply_to_menus();
+        let theme = Some(cfg.theme);
+        let light = theme::taskbar_light();
         let last_on = if cfg.mode != Mode::Off { cfg.mode } else { Mode::Activity };
         let app = App {
             hwnd,
             cfg,
             cfg_mtime: config::mtime(),
             last_on,
-            icons: [icons::make(Look::Off), icons::make(Look::Awake), icons::make(Look::Activity)],
+            icons: [Look::Off, Look::Awake, Look::Activity].map(|look| icons::make(look, light)),
             applied: None,
             shown: None,
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
+            theme,
         };
         APP.with(|cell| *cell.borrow_mut() = Some(app));
         with_app(|app| app.add_icon());
@@ -405,6 +473,11 @@ fn main() {
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            // Tab, Enter and Esc in the Settings and About windows.
+            let active = GetActiveWindow();
+            if !active.is_null() && active != hwnd && IsDialogMessageW(active, &msg) != 0 {
+                continue;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

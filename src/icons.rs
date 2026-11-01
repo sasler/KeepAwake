@@ -11,8 +11,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::art::{self, Look};
 
-/// Renders the artwork at the small-icon size for the current DPI.
-pub fn make(look: Look) -> HICON {
+/// Renders the artwork at the small-icon size for the current DPI, for a light or dark taskbar.
+pub fn make(look: Look, light_taskbar: bool) -> HICON {
     unsafe {
         let size = GetSystemMetrics(SM_CXSMICON).max(16);
         let mut bmi: BITMAPINFO = zeroed();
@@ -28,7 +28,7 @@ pub fn make(look: Look) -> HICON {
             return null_mut();
         }
         let px = std::slice::from_raw_parts_mut(bits as *mut u32, (size * size) as usize);
-        for (dst, c) in px.iter_mut().zip(art::render(size as u32, look).chunks_exact(4)) {
+        for (dst, c) in px.iter_mut().zip(art::render_on(size as u32, look, light_taskbar).chunks_exact(4)) {
             *dst = (c[3] as u32) << 24 | (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32;
         }
 

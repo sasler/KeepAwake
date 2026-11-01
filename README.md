@@ -1,8 +1,30 @@
 # KeepAwake
 
-A tiny Windows tray app (~330 KB exe, ~1.5 MB private memory, near-zero CPU, no dependencies besides `windows-sys`) that stops Windows from locking or sleeping while you're idle.
+A tiny Windows tray app (~350 KB exe, ~1.5 MB private memory, near-zero CPU, no dependencies besides `windows-sys`) that stops Windows from locking or sleeping while you're idle.
+
+It follows the Windows light/dark setting for its menu and its Settings and About windows, and uses a tray icon that stays visible on both light and dark taskbars.
 
 The icons are drawn in code ([src/art.rs](src/art.rs)) at the exact size Windows needs, and `build.rs` embeds the same artwork as the exe icon.
+
+## Install
+
+1. Download `keepawake.exe` from the [latest release](https://github.com/sasler/KeepAwake/releases/latest).
+2. Put it somewhere permanent, for example `%LOCALAPPDATA%\Programs\KeepAwake\`.
+3. Run it. The exe isn't code-signed, so SmartScreen may warn the first time: choose **More info → Run anyway**.
+4. Right-click the mug in the tray and turn on **Start with Windows**.
+
+Or, from PowerShell:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\Programs\KeepAwake"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Invoke-WebRequest https://github.com/sasler/KeepAwake/releases/latest/download/keepawake.exe -OutFile "$dir\keepawake.exe"
+Start-Process "$dir\keepawake.exe"
+```
+
+**Update:** choose **Exit** from the tray menu, replace the exe, and start it again. **About KeepAwake** shows the installed version, and its *Check for updates* button opens the latest release.
+
+**Uninstall:** turn off *Start with Windows*, choose **Exit**, then delete the exe and `%APPDATA%\KeepAwake`.
 
 ## Modes
 
@@ -15,14 +37,16 @@ The icons are drawn in code ([src/art.rs](src/art.rs)) at the exact size Windows
 ## Use
 
 - **Left-click** the tray icon: toggle between Off and the last used mode.
-- **Right-click**: menu with mode, **Duration** (indefinitely, 30 min – 8 h, or until end of work hours; reverts to Off afterwards), **Work-hours schedule**, **Start with Windows**, **Edit settings…**, **Exit**.
+- **Right-click**: menu with mode, **Duration** (indefinitely, 30 min – 8 h, or until end of work hours; reverts to Off afterwards), **Work-hours schedule**, **Start with Windows**, **Settings…**, **About KeepAwake**, **Exit**.
 - Hover for the current state and time left.
 
 The mode and timer are remembered across restarts.
 
 ## Settings
 
-`%APPDATA%\KeepAwake\config.ini` (opened by *Edit settings…*). Saved edits apply within 5 seconds.
+**Settings…** opens a window for startup, appearance (same as Windows, light or dark), the simulated-activity interval and input, and the work-hours schedule.
+
+Everything is stored in `%APPDATA%\KeepAwake\config.ini`. *Open config file* in the Settings window opens it in Notepad; saved edits apply within 5 seconds.
 
 ```ini
 mode=off              # off | awake | activity
@@ -34,6 +58,7 @@ schedule_days=Mon-Fri # or Mon,Wed,Fri
 schedule_start=08:00
 schedule_end=17:00
 schedule_mode=activity
+theme=system          # system | light | dark
 ```
 
 The schedule applies only while the manual mode is **Off**: during the window it uses `schedule_mode`, outside it does nothing. Overnight windows (e.g. 22:00–06:00) work.
@@ -49,6 +74,19 @@ cargo build --release
 ```
 
 Output: `target\release\keepawake.exe`. Copy it anywhere, run it, and enable *Start with Windows* from the menu.
+
+The version comes from `Cargo.toml`. `build.rs` adds the git commit and build date (shown in About) and embeds Windows version info, which shows up under the exe's Properties → Details.
+
+## Release
+
+Bump `version` in `Cargo.toml`, commit, then build and publish:
+
+```bash
+cargo build --release
+gh release create vX.Y.Z target/release/keepawake.exe --title "KeepAwake X.Y.Z" --generate-notes
+```
+
+Keep the asset name `keepawake.exe`: the install steps download `releases/latest/download/keepawake.exe`.
 
 ## Limits
 
